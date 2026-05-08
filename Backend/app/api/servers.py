@@ -69,7 +69,22 @@ async def delete_server(
     server = result.scalar_one_or_none()
     if not server:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
+
+    # If the server is online, try to send an uninstall command
+    if server.is_online:
+        from app.ws.client_handler import _send_agent_fire_and_forget
+        try:
+            await _send_agent_fire_and_forget(
+                server_id=str(server.id),
+                action="agent.uninstall",
+                params={}
+            )
+        except Exception as e:
+            # We don't block deletion if uninstall fails (e.g. agent disconnected mid-request)
+            print(f"Failed to send uninstall command to server {server.id}: {e}")
+
     await db.delete(server)
+    await db.commit()
 
 
 @router.get("/{server_id}/install-command")
