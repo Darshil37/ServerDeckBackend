@@ -6,7 +6,7 @@ import asyncio
 
 # Import all models so Alembic can detect them
 from app.database import Base
-from app.models import User, Team, Server, Site, AuditLog  # noqa: F401
+from app.models import User, Team, Server, ServerFolder, Site, AuditLog  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
