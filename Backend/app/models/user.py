@@ -16,6 +16,7 @@ class Team(Base):
     # Relationships
     users: Mapped[list["User"]] = relationship("User", back_populates="team", cascade="all, delete-orphan")
     servers: Mapped[list["Server"]] = relationship("Server", back_populates="team", cascade="all, delete-orphan")
+    folders: Mapped[list["ServerFolder"]] = relationship("ServerFolder", back_populates="team", cascade="all, delete-orphan")
 
 
 class User(Base):

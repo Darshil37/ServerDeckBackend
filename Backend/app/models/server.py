@@ -6,6 +6,22 @@ from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 
 
+class ServerFolder(Base):
+    __tablename__ = "server_folders"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("server_folders.id"), nullable=True)
+    team_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    team: Mapped["Team"] = relationship("Team", back_populates="folders")
+    parent: Mapped["ServerFolder | None"] = relationship("ServerFolder", remote_side=[id], back_populates="children")
+    children: Mapped[list["ServerFolder"]] = relationship("ServerFolder", back_populates="parent", cascade="all, delete-orphan")
+    servers: Mapped[list["Server"]] = relationship("Server", back_populates="folder")
+
+
 class Server(Base):
     __tablename__ = "servers"
 
@@ -15,6 +31,7 @@ class Server(Base):
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     os_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
     team_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False)
+    folder_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("server_folders.id"), nullable=True)
     agent_token: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     agent_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     is_online: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -37,6 +54,7 @@ class Server(Base):
 
     # Relationships
     team: Mapped["Team"] = relationship("Team", back_populates="servers")
+    folder: Mapped["ServerFolder | None"] = relationship("ServerFolder", back_populates="servers")
     sites: Mapped[list["Site"]] = relationship("Site", back_populates="server", cascade="all, delete-orphan")
     audit_logs: Mapped[list["AuditLog"]] = relationship("AuditLog", back_populates="server", cascade="all, delete-orphan")
 

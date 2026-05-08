@@ -4,8 +4,23 @@ from datetime import datetime
 from typing import Any
 
 
+class FolderCreate(BaseModel):
+    name: str
+    parent_id: UUID | None = None
+
+
+class FolderResponse(BaseModel):
+    id: UUID
+    name: str
+    parent_id: UUID | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ServerCreate(BaseModel):
     name: str
+    folder_id: UUID | None = None
 
 
 class ServerResponse(BaseModel):
@@ -14,6 +29,7 @@ class ServerResponse(BaseModel):
     hostname: str | None = None
     ip_address: str | None = None
     os_info: str | None = None
+    folder_id: UUID | None = None
     agent_token: str
     agent_version: str | None = None
     is_online: bool = False

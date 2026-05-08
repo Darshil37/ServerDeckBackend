@@ -34,6 +34,7 @@ async def create_server(
     server = Server(
         name=data.name,
         team_id=user.team_id,
+        folder_id=data.folder_id,
         agent_token=secrets.token_urlsafe(32),
     )
     db.add(server)
@@ -110,3 +111,22 @@ async def get_install_command(
         f"bash -s -- --token={server.agent_token} --portal={portal_ws}"
     )
     return {"install_command": install_cmd, "agent_token": server.agent_token}
+
+@router.patch("/{server_id}/move")
+async def move_server(
+    server_id: str,
+    folder_id: str | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Server).where(Server.id == server_id, Server.team_id == user.team_id)
+    )
+    server = result.scalar_one_or_none()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+        
+    # Convert empty string to None
+    server.folder_id = folder_id if folder_id else None
+    await db.commit()
+    return {"message": "Server moved successfully"}
