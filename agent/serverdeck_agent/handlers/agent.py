@@ -13,22 +13,22 @@ async def handle_uninstall(params: dict) -> dict:
     """
     logger.info("Uninstall command received. Initiating self-destruct...")
     
-    # The script to run in the background
-    # It waits 2 seconds to allow the response to be sent back to the portal
+    # We use systemd-run to launch a transient unit that survives the agent's own termination.
+    # This ensures that even when the service stops, the cleanup script continues to run.
     uninstall_script = (
-        "sleep 2; "
+        "systemd-run --on-active=2s /bin/bash -c '"
         "systemctl stop serverdeck-agent; "
         "systemctl disable serverdeck-agent; "
         "rm -f /etc/systemd/system/serverdeck-agent.service; "
         "systemctl daemon-reload; "
         "rm -rf /opt/serverdeck /etc/serverdeck; "
-        "logger 'ServerDeck Agent uninstalled and files removed'"
+        "logger \"ServerDeck Agent uninstalled and files removed\"'"
     )
     
     try:
-        # Run the script in the background without waiting for it
-        subprocess.Popen(["/bin/bash", "-c", uninstall_script], start_new_session=True)
-        return {"status": "success", "message": "Uninstallation initiated"}
+        # Run the systemd-run command
+        subprocess.run(["/bin/bash", "-c", uninstall_script], check=True)
+        return {"status": "success", "message": "Uninstallation scheduled"}
     except Exception as e:
         logger.error(f"Failed to initiate uninstallation: {e}")
         return {"error": str(e)}
