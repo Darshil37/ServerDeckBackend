@@ -35,6 +35,18 @@ class User(Base):
     audit_logs: Mapped[list["AuditLog"]] = relationship("AuditLog", back_populates="user")
 
 
+class UserInvite(Base):
+    __tablename__ = "user_invites"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), default="member")
+    team_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False)
+    token: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 # Avoid circular import — import Server at module level for relationship resolution
 from app.models.server import Server  # noqa: E402, F401
 from app.models.audit import AuditLog  # noqa: E402, F401

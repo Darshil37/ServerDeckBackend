@@ -39,3 +39,21 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise credentials_exception
     return user
+
+
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    if user.role not in ["owner", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to perform this action"
+        )
+    return user
+
+
+async def require_owner(user: User = Depends(get_current_user)) -> User:
+    if user.role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the team owner can perform this action"
+        )
+    return user
