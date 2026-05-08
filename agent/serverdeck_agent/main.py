@@ -67,6 +67,8 @@ HANDLERS = {
     "files.write": files.handle_write,
     "files.delete": files.handle_delete,
     "files.mkdir": files.handle_mkdir,
+    "files.download": files.handle_download,
+    "files.upload": files.handle_upload,
     # Agent Management
     "agent.uninstall": agent.handle_uninstall,
 }
