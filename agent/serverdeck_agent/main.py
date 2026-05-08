@@ -9,7 +9,7 @@ import sys
 
 from serverdeck_agent.config import load_config
 from serverdeck_agent.connection import AgentConnection
-from serverdeck_agent.handlers import nginx, systemd, pm2, ssl, logs, firewall, process, agent
+from serverdeck_agent.handlers import nginx, systemd, pm2, ssl, logs, firewall, process, agent, files
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,6 +61,12 @@ HANDLERS = {
     # Process
     "process.list": process.handle_list,
     "process.kill": process.handle_kill,
+    # Files
+    "files.list": files.handle_list,
+    "files.read": files.handle_read,
+    "files.write": files.handle_write,
+    "files.delete": files.handle_delete,
+    "files.mkdir": files.handle_mkdir,
     # Agent Management
     "agent.uninstall": agent.handle_uninstall,
 }
