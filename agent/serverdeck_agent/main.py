@@ -9,7 +9,7 @@ import sys
 
 from serverdeck_agent.config import load_config
 from serverdeck_agent.connection import AgentConnection
-from serverdeck_agent.handlers import nginx, systemd, pm2, ssl, logs, firewall, process, agent, files
+from serverdeck_agent.handlers import nginx, systemd, pm2, ssl, logs, firewall, process, agent, files, automation
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,6 +71,8 @@ HANDLERS = {
     "files.upload": files.handle_upload,
     # Agent Management
     "agent.uninstall": agent.handle_uninstall,
+    # Automation
+    "automation.run": automation.handle_run_script,
 }
 
 # Allowlist of valid actions (security: reject unknown commands)
