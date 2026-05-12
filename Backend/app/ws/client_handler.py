@@ -105,11 +105,6 @@ async def client_websocket(websocket: WebSocket):
                     server_watchers[server_id].add(websocket)
                     client_watches[websocket].add(server_id)
                     await websocket.send_json({"type": "watched", "server_id": server_id})
-                    
-                    # Log access
-                    async with async_session_factory() as db:
-                        await record_audit(db, user_id, server_id, "server.watch")
-                        await db.commit()
 
             elif msg_type == "unwatch":
                 server_id = data.get("server_id")
@@ -137,11 +132,6 @@ async def client_websocket(websocket: WebSocket):
                         timeout=30,
                     )
                     await websocket.send_json(result)
-                    
-                    # Log command
-                    async with async_session_factory() as db:
-                        await record_audit(db, user_id, server_id, f"command.{action}", details=params)
-                        await db.commit()
                 except TimeoutError:
                     if action == "logs.stream":
                         _unsubscribe_stream(cmd_id)
@@ -182,11 +172,6 @@ async def client_websocket(websocket: WebSocket):
                     )
                     result.setdefault("type", "terminal_opened")
                     await websocket.send_json(result)
-                    
-                    # Log SSH access
-                    async with async_session_factory() as db:
-                        await record_audit(db, user_id, server_id, "terminal.open", details={"shell": shell})
-                        await db.commit()
                 except Exception as e:
                     _unsubscribe_stream(cmd_id)
                     await websocket.send_json({

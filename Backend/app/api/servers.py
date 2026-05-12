@@ -41,11 +41,6 @@ async def create_server(
     db.add(server)
     await db.flush()
     await db.refresh(server)
-    
-    # Log server creation
-    await record_audit(db, user.id, server.id, "server.create", details={"name": server.name})
-    await db.commit()
-    
     return server
 
 
@@ -94,6 +89,10 @@ async def delete_server(
             print(f"Failed to send uninstall command to server {server.id}: {e}")
 
     await db.delete(server)
+    
+    # Log server deletion
+    await record_audit(db, user.id, server_id, "server.delete", details={"name": server.name})
+    
     await db.commit()
 
 
