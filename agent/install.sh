@@ -55,7 +55,7 @@ echo ""
 # Step 1: Install system dependencies
 echo -e "${YELLOW}[1/7] Installing system dependencies...${NC}"
 if command -v apt-get &> /dev/null; then
-    apt-get update -qq
+    apt-get update -qq || true
     apt-get install -y -qq python3 python3-pip python3-venv curl tar > /dev/null 2>&1
 elif command -v yum &> /dev/null; then
     yum install -y -q python3 python3-pip curl tar > /dev/null 2>&1
