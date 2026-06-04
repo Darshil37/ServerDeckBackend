@@ -15,13 +15,13 @@ class Settings(BaseSettings):
     cors_origins: list[str] = [
         "http://localhost:5173", 
         "http://localhost:3000", 
-        "https://serverdeck.koushik.cc", 
+        "https://serverdeck.dynamiqqr.com", 
         "https://server-deck-frontend.vercel.app"
     ]
 
     # App
     app_name: str = "ServerDeck"
-    portal_base_url: str = "https://serverdeck.koushik.cc"
+    portal_base_url: str = "https://serverdeck.dynamiqqr.com"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
