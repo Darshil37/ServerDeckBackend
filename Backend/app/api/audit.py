@@ -21,8 +21,8 @@ async def list_audit_logs(
 ):
     query = (
         select(AuditLog)
-        .join(Server)
-        .where(Server.team_id == user.team_id)
+        .join(User, AuditLog.user_id == User.id)
+        .where(User.team_id == user.team_id)
         .options(selectinload(AuditLog.user), selectinload(AuditLog.server))
         .order_by(AuditLog.timestamp.desc())
     )
@@ -49,6 +49,9 @@ async def list_audit_logs(
             "server": {
                 "id": str(log.server.id),
                 "name": log.server.name
+            } if log.server else {
+                "id": "system",
+                "name": "SYSTEM"
             }
         }
         for log in logs
