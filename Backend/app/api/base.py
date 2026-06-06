@@ -3,6 +3,7 @@ from app import agent_handler, client_handler
 
 from fastapi import APIRouter
 
+print("api base imported")
 app = APIRouter()
 # REST API routers
 app.include_router(auth.router)
