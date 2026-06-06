@@ -1,5 +1,5 @@
-from app import auth, servers, sites, dashboard, logs, agent_dist, users, folders, audit, admin, tickets
-from app import agent_handler, client_handler
+from app.api import auth, servers, sites, dashboard, logs, agent_dist, users, folders, audit, admin, tickets
+from app.ws import agent_handler, client_handler
 
 from fastapi import APIRouter
 
