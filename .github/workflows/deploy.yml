@@ -1,0 +1,48 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /coderepo/ServerDeckBackend
+            git pull origin main
+            source /coderepo/ServerDeckBackend/venv/bin/activate
+            pip install -r Backend/requirements.txt --quiet
+            systemctl daemon-reload
+            systemctl restart serverdeckapi.service
+            systemctl reload nginx
+
+      - name: Send Deployment Email Alert
+        if: always() # Sends the email regardless of whether the deployment succeeded or failed
+        uses: dawidd6/action-send-mail@v3
+        with:
+          # SMTP Server Configuration
+          server_address: ${{ secrets.MAIL_SERVER }} # e.g., smtp.gmail.com
+          server_port: 587                           # or 587 for STARTTLS
+          username: ${{ secrets.MAIL_USERNAME }}     # Your email address
+          password: ${{ secrets.MAIL_PASSWORD }}     # Your app-specific password
+          
+          # Email Content
+          subject: "Deployment Status: ${{ job.status }}"
+          to: ashwinvk77@gmail.com
+          from: GitHub Actions Deployer
+          body: |
+            The deployment for ServerDeckBackend has finished.
+            
+            Status: ${{ job.status }}
+            Repository: ${{ github.repository }}
+            Commit: ${{ github.sha }}
+            Triggered by: ${{ github.actor }}
