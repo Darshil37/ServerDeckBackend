@@ -110,9 +110,11 @@ Return only the JSON. No preamble.
                     json={
                         "model": "llama-3.3-70b-versatile",
                         "messages": [
+                            {"role": "system", "content": "You are a Linux server operations expert. Respond only with valid JSON."},
                             {"role": "user", "content": prompt}
                         ],
-                        "response_format": {"type": "json_object"}
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0.2
                     },
                     timeout=45.0
                 )
