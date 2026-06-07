@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     smtp_from_email: str
     smtp_from_name: str
 
+    grok_api_key: str
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

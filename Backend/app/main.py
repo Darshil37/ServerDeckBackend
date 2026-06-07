@@ -8,7 +8,7 @@ from alembic.config import Config
 from alembic import command
 
 from app.config import get_settings
-from app.services.alerting import check_alerts
+from app.services.alert_service import check_alerts
 from app.api.base import app as api_app
 
 settings = get_settings()
