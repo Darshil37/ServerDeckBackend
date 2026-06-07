@@ -22,10 +22,33 @@ logger = logging.getLogger(__name__)
 
 
 async def run_migrations():
-    def _run():
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.database import engine
+    from app.models.organization import Organization
+    from sqlalchemy import select
+    from app.services.tenant import run_tenant_migrations
+    import traceback
+
+    def _run_public():
         alembic_cfg = Config(os.path.join(os.path.dirname(__file__), "..", "alembic.ini"))
         command.upgrade(alembic_cfg, "head")
-    await asyncio.to_thread(_run)
+
+    # Migrate public schema
+    await asyncio.to_thread(_run_public)
+
+    # Migrate all tenant schemas
+    try:
+        async with AsyncSession(engine) as db:
+            orgs = await db.execute(select(Organization))
+            for org in orgs.scalars().all():
+                schema_name = f"tenant_{org.org_key}"
+                try:
+                    await asyncio.to_thread(run_tenant_migrations, schema_name)
+                except Exception as e:
+                    logger.error(f"Failed to migrate tenant {schema_name}: {e}")
+    except Exception as e:
+        logger.error(f"Failed to fetch organizations for migration: {e}")
+        traceback.print_exc()
 
 
 @asynccontextmanager
