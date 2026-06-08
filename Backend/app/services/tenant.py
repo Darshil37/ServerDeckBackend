@@ -10,20 +10,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger("serverdeck.tenant")
 
 COMMON_DOMAINS = {
-    "yahoo", "hotmail", "outlook", "icloud", "aol", 
-    "zoho", "protonmail", "proton", "mail", "live", "msn"
+    "gmail", "yahoo", "hotmail", "outlook", "icloud", "aol", 
+    "zoho", "protonmail", "proton", "mail", "live", "msn",
+    "googlemail", "me", "mac", "ymail", "rocketmail",
 }
 
+# Shared schema for all individual (personal email) users
+INDIVIDUAL_SCHEMA = "tenant_individual"
+
+def is_personal_email(email: str) -> bool:
+    """Returns True if the email is from a common personal/consumer provider."""
+    if not email or "@" not in email:
+        return False
+    domain = email.split("@")[1].strip().lower()
+    parts = domain.split(".")
+    if len(parts) >= 2:
+        return parts[0] in COMMON_DOMAINS
+    return False
+
 def get_org_key_from_email(email: str) -> str | None:
+    """
+    Derive an org key from an email address.
+    - Personal email domains (gmail, outlook, etc.) → returns "individual"
+    - Business/work email domains → returns the domain prefix (e.g. "acme" from acme.com)
+    - Invalid email → returns None
+    """
     if not email or "@" not in email:
         return None
     domain = email.split("@")[1].strip().lower()
     parts = domain.split(".")
     if len(parts) >= 2:
         key = parts[0]
-        # Ignore common/personal email subdomains or top domains if they equal common domains
         if key in COMMON_DOMAINS:
-            return None
+            return "individual"
         return key
     return None
 
@@ -60,6 +79,35 @@ def run_tenant_migrations(schema_name: str):
         raise Exception(f"Alembic migration failed: {result.stderr}")
         
     logger.info(f"Successfully migrated schema: {schema_name}")
+
+# Track whether individual schema has been initialised in this process lifetime.
+# Avoids re-running migrations on every individual user login/register.
+_individual_schema_ready = False
+
+async def ensure_individual_schema_exists(db: AsyncSession):
+    """
+    Lazily create and migrate the shared individual-user schema (tenant_individual).
+    Safe to call multiple times — idempotent.
+    """
+    global _individual_schema_ready
+    if _individual_schema_ready:
+        return
+
+    # Check if schema already exists in PostgreSQL
+    result = await db.execute(
+        text("SELECT schema_name FROM information_schema.schemata WHERE schema_name = :s"),
+        {"s": INDIVIDUAL_SCHEMA},
+    )
+    exists = result.scalar_one_or_none() is not None
+
+    if not exists:
+        logger.info(f"Creating individual schema: {INDIVIDUAL_SCHEMA}")
+        await create_tenant_schema(INDIVIDUAL_SCHEMA, db)
+        run_tenant_migrations(INDIVIDUAL_SCHEMA)
+    else:
+        logger.debug(f"Individual schema {INDIVIDUAL_SCHEMA} already exists — skipping migration.")
+
+    _individual_schema_ready = True
 
 async def resolve_tenant(conn: HTTPConnection) -> str | None:
     """Dependency/Helper to dynamically resolve and set the active tenant_schema ContextVar.
@@ -113,7 +161,9 @@ async def resolve_tenant(conn: HTTPConnection) -> str | None:
                         schema_name = f"tenant_{org_key}"
                 elif "email" in body:
                     org_key = get_org_key_from_email(body["email"])
-                    if org_key:
+                    if org_key == "individual":
+                        schema_name = INDIVIDUAL_SCHEMA
+                    elif org_key:
                         schema_name = f"tenant_{org_key}"
             except Exception as e:
                 logger.error(f"Error resolving tenant from body: {e}")

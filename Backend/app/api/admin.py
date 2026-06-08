@@ -14,7 +14,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models.organization import Organization, PlatformUser
 from app.models.user import User, Team
-from app.schemas.user import OrgCreate, OrgResponse, PlatformUserResponse, TokenResponse
+from app.schemas.user import OrgCreate, OrgResponse, PlatformUserResponse, TokenResponse, IndividualUserCreate, IndividualUserResponse
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -176,4 +176,88 @@ async def delete_organization(
     # Drop the tenant schema
     await db.execute(text(f"DROP SCHEMA IF EXISTS {org.schema_name} CASCADE"))
     await db.delete(org)
+    await db.commit()
+
+
+# ── Individual Users ──────────────────────────────────────────────────────────
+
+@router.get("/users", response_model=list[IndividualUserResponse])
+async def list_individual_users(
+    _: PlatformUser = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all individual (personal email) users from the shared tenant_individual schema."""
+    from app.services.tenant import INDIVIDUAL_SCHEMA, ensure_individual_schema_exists
+
+    await ensure_individual_schema_exists(db)
+    await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
+    result = await db.execute(select(User).order_by(User.created_at.desc()))
+    return result.scalars().all()
+
+
+@router.post("/users", response_model=IndividualUserResponse, status_code=status.HTTP_201_CREATED)
+async def create_individual_user(
+    data: IndividualUserCreate,
+    _: PlatformUser = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new individual user in the shared tenant_individual schema."""
+    from app.services.tenant import INDIVIDUAL_SCHEMA, ensure_individual_schema_exists
+
+    await ensure_individual_schema_exists(db)
+    await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
+
+    # Reject if email belongs to a business domain (should use org flow instead)
+    from app.services.tenant import is_personal_email
+    if not is_personal_email(data.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use the Organizations section to onboard users with business email domains."
+        )
+
+    existing = await db.execute(select(User).where(User.email == data.email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+
+    # Each individual user gets their own Team for data isolation
+    team = Team(name=f"{data.name}'s Team")
+    db.add(team)
+    await db.flush()
+
+    user = User(
+        email=data.email,
+        password_hash=pwd_context.hash(data.password),
+        name=data.name,
+        team_id=team.id,
+        role="owner",
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_individual_user(
+    user_id: str,
+    _: PlatformUser = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete an individual user and their associated Team (and all cascaded data)."""
+    from app.services.tenant import INDIVIDUAL_SCHEMA
+
+    await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # Delete the user's Team — cascades to servers, folders, audit logs, etc.
+    team_result = await db.execute(select(Team).where(Team.id == user.team_id))
+    team = team_result.scalar_one_or_none()
+    if team:
+        await db.delete(team)
+    else:
+        await db.delete(user)
+
     await db.commit()

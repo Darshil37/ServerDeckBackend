@@ -90,3 +90,22 @@ class OrgResponse(BaseModel):
     created_at: datetime.datetime
 
     model_config = {"from_attributes": True}
+
+
+# ---- Individual User schemas ----
+
+class IndividualUserCreate(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+
+
+class IndividualUserResponse(BaseModel):
+    id: UUID
+    name: str
+    email: str
+    team_id: UUID
+    created_at: datetime.datetime
+
+    model_config = {"from_attributes": True}
+

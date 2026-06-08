@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models.user import User, Team
 from app.models.organization import Organization, PlatformUser
 from app.schemas.user import UserCreate, UserLogin, TokenResponse, UserResponse, PlatformUserResponse
+from app.services.tenant import INDIVIDUAL_SCHEMA
 from app.services.audit import record_audit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -43,17 +44,54 @@ def create_platform_owner_token(platform_user: PlatformUser) -> str:
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(data: UserCreate, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    from app.services.tenant import get_org_key_from_email, create_tenant_schema, run_tenant_migrations
+    from app.services.tenant import get_org_key_from_email, create_tenant_schema, run_tenant_migrations, ensure_individual_schema_exists
     from app.services.email_service import send_org_creation_email
     from sqlalchemy import text
 
     org_key = get_org_key_from_email(data.email)
     if not org_key:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Registration is only allowed for work/business emails."
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email address."
         )
 
+    # ── Individual user (personal email: gmail, outlook, etc.) ──────────────
+    if org_key == "individual":
+        schema_name = INDIVIDUAL_SCHEMA
+        # Ensure the shared individual schema exists (lazy init, idempotent)
+        await ensure_individual_schema_exists(db)
+        await db.execute(text(f"SET search_path TO {schema_name}, public"))
+
+        # Check if this personal email is already registered
+        existing = await db.execute(select(User).where(User.email == data.email))
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+
+        # Each individual user gets their own Team for data isolation
+        team = Team(name=f"{data.name}'s Team")
+        db.add(team)
+        await db.flush()
+
+        user = User(
+            email=data.email,
+            password_hash=pwd_context.hash(data.password),
+            name=data.name,
+            team_id=team.id,
+            role="owner",
+        )
+        db.add(user)
+        await db.flush()
+
+        await record_audit(db, user.id, None, "auth.register", details={"email": data.email})
+        token = create_access_token(user, schema_name)
+        background_tasks.add_task(send_org_creation_email, data.email, "ServerDeck", data.name)
+        return TokenResponse(
+            access_token=token,
+            user=UserResponse.model_validate(user),
+            is_platform_owner=False,
+        )
+
+    # ── Organization / business email ────────────────────────────────────────
     # Check if organization domain is already registered
     result = await db.execute(select(Organization).where(Organization.org_key == org_key))
     org = result.scalar_one_or_none()
@@ -114,7 +152,7 @@ async def register(data: UserCreate, background_tasks: BackgroundTasks, db: Asyn
     await record_audit(db, user.id, None, "auth.register", details={"email": data.email})
 
     token = create_access_token(user, schema_name)
-    
+
     # Send welcome email asynchronously
     background_tasks.add_task(send_org_creation_email, data.email, org_key.capitalize(), data.name)
 
@@ -159,6 +197,25 @@ async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
     if not org_key:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email domain")
 
+    # ── Individual user (personal email) ────────────────────────────────────
+    if org_key == "individual":
+        schema_name = INDIVIDUAL_SCHEMA
+        await db.execute(text(f"SET search_path TO {schema_name}, public"))
+        result = await db.execute(select(User).where(User.email == data.email))
+        user = result.scalar_one_or_none()
+        if not user or not pwd_context.verify(data.password, user.password_hash):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+        if not user.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
+        await record_audit(db, user.id, None, "auth.login", details={"email": data.email})
+        token = create_access_token(user, schema_name)
+        return TokenResponse(
+            access_token=token,
+            user=UserResponse.model_validate(user),
+            is_platform_owner=False,
+        )
+
+    # ── Organization / business email ────────────────────────────────────────
     result = await db.execute(select(Organization).where(Organization.org_key == org_key))
     org = result.scalar_one_or_none()
     if not org:
