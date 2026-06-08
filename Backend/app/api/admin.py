@@ -584,10 +584,12 @@ async def approve_waitlist(
     )
     db.add(invite)
 
+    await db.flush()
+    user_response = IndividualUserResponse.model_validate(user)
+
     # Delete the waitlist request
     await db.delete(req)
     await db.commit()
-    await db.refresh(user)
 
     invite_url = f"{settings.frontend_url}/invite/{token}"
 
@@ -600,4 +602,4 @@ async def approve_waitlist(
         invite_url,
     )
 
-    return user
+    return user_response
