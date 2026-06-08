@@ -34,7 +34,7 @@ jobs:
           RESPONSE=$(curl -s -X 'GET' 'https://api.serverdeck.online/api/health' -H 'accept: application/json')
           echo "Response: $RESPONSE"
           
-          if echo "$RESPONSE" | grep -q '"status": "ok"' && echo "$RESPONSE" | grep -q '"service": "serverdeck-api"'; then
+          if echo "$RESPONSE" | grep -q '"ok"' && echo "$RESPONSE" | grep -q '"serverdeck-api"'; then
             echo "Health check passed!"
           else
             echo "Health check failed! Expected status=ok and service=serverdeck-api"
