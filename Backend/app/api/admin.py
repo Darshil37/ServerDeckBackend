@@ -2,6 +2,8 @@
 Admin API — platform owner only.
 Endpoints for managing organizations and their initial superadmin users.
 """
+import logging
+import traceback
 from app.services.email_service import send_org_creation_email
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy import select, text
@@ -20,6 +22,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 settings = get_settings()
 bearer_scheme = HTTPBearer()
+logger = logging.getLogger("serverdeck.admin")
 
 
 async def require_platform_owner(
@@ -189,10 +192,20 @@ async def list_individual_users(
     """List all individual (personal email) users from the shared tenant_individual schema."""
     from app.services.tenant import INDIVIDUAL_SCHEMA, ensure_individual_schema_exists
 
-    await ensure_individual_schema_exists(db)
-    await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
-    result = await db.execute(select(User).order_by(User.created_at.desc()))
-    return result.scalars().all()
+    logger.info("[admin/users] Listing individual users")
+    try:
+        await ensure_individual_schema_exists(db)
+        logger.info(f"[admin/users] Schema ready: {INDIVIDUAL_SCHEMA}, setting search_path")
+        await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
+        result = await db.execute(select(User).order_by(User.created_at.desc()))
+        users = result.scalars().all()
+        logger.info(f"[admin/users] Found {len(users)} individual user(s)")
+        return users
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[admin/users] Unexpected error listing users: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
 @router.post("/users", response_model=IndividualUserResponse, status_code=status.HTTP_201_CREATED)
@@ -202,39 +215,64 @@ async def create_individual_user(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new individual user in the shared tenant_individual schema."""
-    from app.services.tenant import INDIVIDUAL_SCHEMA, ensure_individual_schema_exists
+    from app.services.tenant import INDIVIDUAL_SCHEMA, ensure_individual_schema_exists, is_personal_email
 
-    await ensure_individual_schema_exists(db)
-    await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
+    logger.info(f"[admin/users] Creating individual user: email={data.email}, name={data.name}")
 
-    # Reject if email belongs to a business domain (should use org flow instead)
-    from app.services.tenant import is_personal_email
-    if not is_personal_email(data.email):
+    # Step 1 — validate email domain
+    is_personal = is_personal_email(data.email)
+    logger.info(f"[admin/users] is_personal_email('{data.email}') = {is_personal}")
+    if not is_personal:
+        logger.warning(f"[admin/users] Rejected non-personal email: {data.email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Use the Organizations section to onboard users with business email domains."
         )
 
-    existing = await db.execute(select(User).where(User.email == data.email))
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+    try:
+        # Step 2 — ensure individual schema exists
+        logger.info(f"[admin/users] Ensuring schema exists: {INDIVIDUAL_SCHEMA}")
+        await ensure_individual_schema_exists(db)
+        logger.info(f"[admin/users] Schema ready, setting search_path to {INDIVIDUAL_SCHEMA}")
+        await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
 
-    # Each individual user gets their own Team for data isolation
-    team = Team(name=f"{data.name}'s Team")
-    db.add(team)
-    await db.flush()
+        # Step 3 — check for duplicate email
+        logger.info(f"[admin/users] Checking for existing user with email: {data.email}")
+        existing = await db.execute(select(User).where(User.email == data.email))
+        if existing.scalar_one_or_none():
+            logger.warning(f"[admin/users] Email already registered: {data.email}")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    user = User(
-        email=data.email,
-        password_hash=pwd_context.hash(data.password),
-        name=data.name,
-        team_id=team.id,
-        role="owner",
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
+        # Step 4 — create Team
+        logger.info(f"[admin/users] Creating team for user: {data.name}")
+        team = Team(name=f"{data.name}'s Team")
+        db.add(team)
+        await db.flush()
+        logger.info(f"[admin/users] Team created with id={team.id}")
+
+        # Step 5 — create User
+        logger.info(f"[admin/users] Creating user record")
+        user = User(
+            email=data.email,
+            password_hash=pwd_context.hash(data.password),
+            name=data.name,
+            team_id=team.id,
+            role="owner",
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        logger.info(f"[admin/users] Individual user created successfully: id={user.id}, email={user.email}")
+        return user
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[admin/users] Unexpected error creating user: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Server error: {str(exc)}"
+        )
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -246,18 +284,34 @@ async def delete_individual_user(
     """Delete an individual user and their associated Team (and all cascaded data)."""
     from app.services.tenant import INDIVIDUAL_SCHEMA
 
-    await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    logger.info(f"[admin/users] Deleting individual user: id={user_id}")
+    try:
+        await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            logger.warning(f"[admin/users] User not found for deletion: id={user_id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Delete the user's Team — cascades to servers, folders, audit logs, etc.
-    team_result = await db.execute(select(Team).where(Team.id == user.team_id))
-    team = team_result.scalar_one_or_none()
-    if team:
-        await db.delete(team)
-    else:
-        await db.delete(user)
+        logger.info(f"[admin/users] Found user email={user.email}, team_id={user.team_id}. Deleting team...")
+        # Delete the user's Team — cascades to servers, folders, audit logs, etc.
+        team_result = await db.execute(select(Team).where(Team.id == user.team_id))
+        team = team_result.scalar_one_or_none()
+        if team:
+            await db.delete(team)
+            logger.info(f"[admin/users] Team {team.id} deleted (cascades user + data)")
+        else:
+            logger.warning(f"[admin/users] No team found for user {user_id}, deleting user directly")
+            await db.delete(user)
 
-    await db.commit()
+        await db.commit()
+        logger.info(f"[admin/users] User {user_id} successfully deleted")
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[admin/users] Unexpected error deleting user {user_id}: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Server error: {str(exc)}"
+        )

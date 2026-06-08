@@ -64,7 +64,9 @@ def run_tenant_migrations(schema_name: str):
     # Get Backend directory path
     backend_dir = Path(__file__).resolve().parent.parent.parent
     
-    logger.info(f"Running database migrations for schema: {schema_name}")
+    logger.info(f"[run_tenant_migrations] Starting Alembic upgrade for schema: {schema_name}")
+    logger.info(f"[run_tenant_migrations] Backend dir: {backend_dir}")
+    logger.info(f"[run_tenant_migrations] Python: {sys.executable}")
     
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
@@ -74,11 +76,18 @@ def run_tenant_migrations(schema_name: str):
         text=True
     )
     
+    logger.info(f"[run_tenant_migrations] Return code: {result.returncode}")
+    if result.stdout:
+        logger.info(f"[run_tenant_migrations] STDOUT:\n{result.stdout}")
+    if result.stderr:
+        logger.info(f"[run_tenant_migrations] STDERR:\n{result.stderr}")
+    
     if result.returncode != 0:
-        logger.error(f"Alembic migration failed for {schema_name}: {result.stderr}")
+        logger.error(f"[run_tenant_migrations] FAILED for schema '{schema_name}'. stderr={result.stderr}")
         raise Exception(f"Alembic migration failed: {result.stderr}")
         
-    logger.info(f"Successfully migrated schema: {schema_name}")
+    logger.info(f"[run_tenant_migrations] Successfully migrated schema: {schema_name}")
+
 
 # Track whether individual schema has been initialised in this process lifetime.
 # Avoids re-running migrations on every individual user login/register.
@@ -90,24 +99,35 @@ async def ensure_individual_schema_exists(db: AsyncSession):
     Safe to call multiple times — idempotent.
     """
     global _individual_schema_ready
+    logger.info(f"[ensure_individual_schema] Called. already_ready={_individual_schema_ready}")
     if _individual_schema_ready:
+        logger.info("[ensure_individual_schema] Schema already initialised this session — skipping.")
         return
 
     # Check if schema already exists in PostgreSQL
+    logger.info(f"[ensure_individual_schema] Querying information_schema for '{INDIVIDUAL_SCHEMA}'")
     result = await db.execute(
         text("SELECT schema_name FROM information_schema.schemata WHERE schema_name = :s"),
         {"s": INDIVIDUAL_SCHEMA},
     )
     exists = result.scalar_one_or_none() is not None
+    logger.info(f"[ensure_individual_schema] Schema exists in DB: {exists}")
 
     if not exists:
-        logger.info(f"Creating individual schema: {INDIVIDUAL_SCHEMA}")
-        await create_tenant_schema(INDIVIDUAL_SCHEMA, db)
-        run_tenant_migrations(INDIVIDUAL_SCHEMA)
+        logger.info(f"[ensure_individual_schema] Creating schema: {INDIVIDUAL_SCHEMA}")
+        try:
+            await create_tenant_schema(INDIVIDUAL_SCHEMA, db)
+            logger.info(f"[ensure_individual_schema] Schema created, starting Alembic migrations...")
+            run_tenant_migrations(INDIVIDUAL_SCHEMA)
+            logger.info(f"[ensure_individual_schema] Migrations completed for {INDIVIDUAL_SCHEMA}")
+        except Exception as exc:
+            logger.error(f"[ensure_individual_schema] FAILED to create/migrate {INDIVIDUAL_SCHEMA}: {exc}")
+            raise
     else:
-        logger.debug(f"Individual schema {INDIVIDUAL_SCHEMA} already exists — skipping migration.")
+        logger.info(f"[ensure_individual_schema] Schema {INDIVIDUAL_SCHEMA} already exists — skipping migration.")
 
     _individual_schema_ready = True
+    logger.info(f"[ensure_individual_schema] Done. _individual_schema_ready=True")
 
 async def resolve_tenant(conn: HTTPConnection) -> str | None:
     """Dependency/Helper to dynamically resolve and set the active tenant_schema ContextVar.
