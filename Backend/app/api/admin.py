@@ -15,8 +15,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.config import get_settings
 from app.database import get_db
 from app.models.organization import Organization, PlatformUser
-from app.models.user import User, Team
-from app.schemas.user import OrgCreate, OrgResponse, PlatformUserResponse, TokenResponse, IndividualUserCreate, IndividualUserResponse
+from app.models.user import User, Team, UserInvite
+from app.schemas.user import OrgCreate, OrgResponse, PlatformUserResponse, TokenResponse, IndividualUserCreate, IndividualUserResponse, IndividualUserInviteResponse
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -208,16 +208,19 @@ async def list_individual_users(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
-@router.post("/users", response_model=IndividualUserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/users", response_model=IndividualUserInviteResponse, status_code=status.HTTP_201_CREATED)
 async def create_individual_user(
     data: IndividualUserCreate,
-    _: PlatformUser = Depends(require_platform_owner),
+    background_tasks: BackgroundTasks,
+    platform_user: PlatformUser = Depends(require_platform_owner),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new individual user in the shared tenant_individual schema."""
+    """Invite a new individual user to the shared tenant_individual schema."""
+    import secrets
+    import datetime
     from app.services.tenant import INDIVIDUAL_SCHEMA, ensure_individual_schema_exists, is_personal_email
 
-    logger.info(f"[admin/users] Creating individual user: email={data.email}, name={data.name}")
+    logger.info(f"[admin/users] Inviting individual user: email={data.email}")
 
     # Step 1 — validate email domain
     is_personal = is_personal_email(data.email)
@@ -236,34 +239,64 @@ async def create_individual_user(
         logger.info(f"[admin/users] Schema ready, setting search_path to {INDIVIDUAL_SCHEMA}")
         await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
 
-        # Step 3 — check for duplicate email
+        # Step 3 — check for duplicate user
         logger.info(f"[admin/users] Checking for existing user with email: {data.email}")
         existing = await db.execute(select(User).where(User.email == data.email))
         if existing.scalar_one_or_none():
             logger.warning(f"[admin/users] Email already registered: {data.email}")
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+            
+        # Check for existing invite
+        logger.info(f"[admin/users] Checking for existing invite with email: {data.email}")
+        existing_invite = await db.execute(select(UserInvite).where(UserInvite.email == data.email))
+        if existing_invite.scalar_one_or_none():
+            logger.warning(f"[admin/users] Invite already sent to: {data.email}")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invite already sent to this email")
 
         # Step 4 — create Team
-        logger.info(f"[admin/users] Creating team for user: {data.name}")
-        team = Team(name=f"{data.name}'s Team")
+        team_name = data.email.split('@')[0].capitalize()
+        logger.info(f"[admin/users] Creating team for user: {team_name}")
+        team = Team(name=f"{team_name}'s Team")
         db.add(team)
         await db.flush()
         logger.info(f"[admin/users] Team created with id={team.id}")
 
-        # Step 5 — create User
-        logger.info(f"[admin/users] Creating user record")
-        user = User(
+        # Step 5 — create UserInvite
+        logger.info(f"[admin/users] Creating user invite record")
+        token = f"{secrets.token_urlsafe(32)}:individual"
+        expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)
+        
+        invite = UserInvite(
             email=data.email,
-            password_hash=pwd_context.hash(data.password),
-            name=data.name,
-            team_id=team.id,
             role="owner",
+            team_id=team.id,
+            token=token,
+            expires_at=expires_at
         )
-        db.add(user)
+        db.add(invite)
         await db.commit()
-        await db.refresh(user)
-        logger.info(f"[admin/users] Individual user created successfully: id={user.id}, email={user.email}")
-        return user
+        
+        # Step 6 — send invite email
+        from app.config import get_settings
+        from app.services.email_service import send_invitation_email
+        settings = get_settings()
+        invite_url = f"{settings.ui_base_url}/invite?token={token}"
+        
+        background_tasks.add_task(
+            send_invitation_email,
+            to_email=data.email,
+            inviter_name=platform_user.name,
+            invite_link=invite_url,
+            org_name="ServerDeck Personal"
+        )
+        
+        logger.info(f"[admin/users] Individual user invite created successfully: email={data.email}, token={token}")
+        
+        return IndividualUserInviteResponse(
+            message="Invitation sent successfully",
+            token=token,
+            invite_url=invite_url
+        )
 
     except HTTPException:
         raise

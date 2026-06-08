@@ -95,9 +95,13 @@ class OrgResponse(BaseModel):
 # ---- Individual User schemas ----
 
 class IndividualUserCreate(BaseModel):
-    name: str
     email: EmailStr
-    password: str
+
+
+class IndividualUserInviteResponse(BaseModel):
+    message: str
+    token: str
+    invite_url: str
 
 
 class IndividualUserResponse(BaseModel):
