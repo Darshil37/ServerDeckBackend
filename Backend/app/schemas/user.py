@@ -113,3 +113,16 @@ class IndividualUserResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+
+# ---- Waitlist schemas ----
+
+class WaitlistCreate(BaseModel):
+    email: EmailStr
+
+class WaitlistResponse(BaseModel):
+    id: UUID
+    email: str
+    created_at: datetime.datetime
+
+    model_config = {"from_attributes": True}
+

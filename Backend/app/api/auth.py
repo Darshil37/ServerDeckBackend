@@ -8,8 +8,8 @@ from jose import jwt
 from app.config import get_settings
 from app.database import get_db
 from app.models.user import User, Team
-from app.models.organization import Organization, PlatformUser
-from app.schemas.user import UserCreate, UserLogin, TokenResponse, UserResponse, PlatformUserResponse
+from app.models.organization import Organization, PlatformUser, WaitlistRequest
+from app.schemas.user import UserCreate, UserLogin, TokenResponse, UserResponse, PlatformUserResponse, WaitlistCreate, WaitlistResponse
 from app.services.tenant import INDIVIDUAL_SCHEMA
 from app.services.audit import record_audit
 
@@ -239,3 +239,21 @@ async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
         user=UserResponse.model_validate(user),
         is_platform_owner=False,
     )
+
+
+# ── Waitlist (Public) ────────────────────────────────────────────────────────
+
+@router.post("/waitlist", response_model=WaitlistResponse, status_code=status.HTTP_201_CREATED)
+async def join_waitlist(data: WaitlistCreate, db: AsyncSession = Depends(get_db)):
+    """Join the waitlist from the public landing page."""
+    # Check if they are already on the waitlist
+    result = await db.execute(select(WaitlistRequest).where(WaitlistRequest.email == data.email))
+    existing = result.scalar_one_or_none()
+    if existing:
+        return existing
+
+    waitlist_req = WaitlistRequest(email=data.email)
+    db.add(waitlist_req)
+    await db.commit()
+    await db.refresh(waitlist_req)
+    return waitlist_req

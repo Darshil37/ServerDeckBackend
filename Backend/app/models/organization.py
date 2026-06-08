@@ -37,3 +37,12 @@ class AgentTokenMapping(Base):
     agent_token: Mapped[str] = mapped_column(String(255), primary_key=True)
     schema_name: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class WaitlistRequest(Base):
+    """Stores emails from users who requested access on the landing page."""
+    __tablename__ = "waitlist_requests"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

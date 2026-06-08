@@ -14,10 +14,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.config import get_settings
 from app.database import get_db
-from app.models.organization import Organization, PlatformUser
+from app.models.organization import Organization, PlatformUser, WaitlistRequest
 from app.models.user import User, Team, UserInvite
 from app.models.ticket import Ticket, TicketMessage
-from app.schemas.user import OrgCreate, OrgResponse, PlatformUserResponse, TokenResponse, IndividualUserCreate, IndividualUserResponse, IndividualUserInviteResponse
+from app.schemas.user import OrgCreate, OrgResponse, PlatformUserResponse, TokenResponse, IndividualUserCreate, IndividualUserResponse, IndividualUserInviteResponse, WaitlistResponse
 from app.schemas.ticket import TicketResponse, TicketDetailResponse, TicketUpdate, TicketMessageCreate, TicketMessageResponse
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -499,3 +499,105 @@ async def add_individual_ticket_message(
     
     await db.commit()
     return db_message
+
+
+# ── Waitlist (Platform Admin) ──────────────────────────────────────────────────
+
+@router.get("/waitlist", response_model=list[WaitlistResponse])
+async def list_waitlist(
+    _: PlatformUser = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db)
+):
+    """List all waitlist requests."""
+    result = await db.execute(select(WaitlistRequest).order_by(WaitlistRequest.created_at.desc()))
+    return result.scalars().all()
+
+
+@router.delete("/waitlist/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_waitlist(
+    request_id: str,
+    _: PlatformUser = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db)
+):
+    """Reject/Delete a waitlist request."""
+    result = await db.execute(select(WaitlistRequest).where(WaitlistRequest.id == request_id))
+    req = result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Waitlist request not found")
+    await db.delete(req)
+    await db.commit()
+
+
+@router.post("/waitlist/{request_id}/approve", response_model=IndividualUserResponse)
+async def approve_waitlist(
+    request_id: str,
+    background_tasks: BackgroundTasks,
+    _: PlatformUser = Depends(require_platform_owner),
+    db: AsyncSession = Depends(get_db)
+):
+    """Approve a waitlist request by creating an individual user account and sending an invite."""
+    result = await db.execute(select(WaitlistRequest).where(WaitlistRequest.id == request_id))
+    req = result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Waitlist request not found")
+
+    email = req.email
+    name = email.split("@")[0].title()
+
+    # Create the user using the same logic as create_individual_user
+    from app.services.tenant import INDIVIDUAL_SCHEMA, ensure_individual_schema_exists
+    from app.services.email_service import send_org_creation_email
+    import datetime
+
+    await ensure_individual_schema_exists(db)
+    await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
+
+    user_result = await db.execute(select(User).where(User.email == email))
+    if user_result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="User already exists")
+
+    # Create their personal Team
+    team = Team(name=f"{name}'s Workspace")
+    db.add(team)
+    await db.flush()
+
+    # Create user with blank password
+    user = User(
+        email=email,
+        password_hash="[invited]",
+        name=name,
+        team_id=team.id,
+        role="owner"
+    )
+    db.add(user)
+    await db.flush()
+
+    # Create invite token
+    import secrets
+    token = secrets.token_urlsafe(32)
+    invite = UserInvite(
+        email=email,
+        role="owner",
+        team_id=team.id,
+        token=token,
+        expires_at=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)
+    )
+    db.add(invite)
+
+    # Delete the waitlist request
+    await db.delete(req)
+    await db.commit()
+    await db.refresh(user)
+
+    invite_url = f"{settings.frontend_url}/invite/{token}"
+
+    background_tasks.add_task(
+        send_org_creation_email,
+        email,
+        name,
+        email,  # individual users don't have a distinct organization name
+        "individual",
+        invite_url,
+    )
+
+    return user
