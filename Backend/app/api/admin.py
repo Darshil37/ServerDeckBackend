@@ -508,9 +508,34 @@ async def list_waitlist(
     _: PlatformUser = Depends(require_platform_owner),
     db: AsyncSession = Depends(get_db)
 ):
-    """List all waitlist requests."""
+    """List all waitlist requests and calculate their status."""
+    from app.services.tenant import INDIVIDUAL_SCHEMA
+    
     result = await db.execute(select(WaitlistRequest).order_by(WaitlistRequest.created_at.desc()))
-    return result.scalars().all()
+    requests = result.scalars().all()
+    if not requests:
+        return []
+        
+    emails = [req.email for req in requests]
+    
+    await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
+    
+    # Check who has an invite
+    invite_result = await db.execute(select(UserInvite.email).where(UserInvite.email.in_(emails)))
+    invited_emails = set(invite_result.scalars().all())
+    
+    response = []
+    for req in requests:
+        status = "invited" if req.email in invited_emails else "pending"
+        response.append(
+            WaitlistResponse(
+                id=req.id, 
+                email=req.email, 
+                created_at=req.created_at, 
+                status=status
+            )
+        )
+    return response
 
 
 @router.delete("/waitlist/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -535,7 +560,7 @@ async def approve_waitlist(
     platform_user: PlatformUser = Depends(require_platform_owner),
     db: AsyncSession = Depends(get_db)
 ):
-    """Approve a waitlist request by creating an individual user account and sending an invite."""
+    """Approve a waitlist request by creating an individual user account and sending an invite. If invited, resends."""
     result = await db.execute(select(WaitlistRequest).where(WaitlistRequest.id == request_id))
     req = result.scalar_one_or_none()
     if not req:
@@ -547,42 +572,49 @@ async def approve_waitlist(
     from app.services.tenant import INDIVIDUAL_SCHEMA, ensure_individual_schema_exists
     import datetime
     import secrets
+    from app.config import get_settings
+    from app.services.email_service import send_invitation_email
+    settings = get_settings()
 
     await ensure_individual_schema_exists(db)
     await db.execute(text(f"SET search_path TO {INDIVIDUAL_SCHEMA}, public"))
 
     user_result = await db.execute(select(User).where(User.email == email))
     if user_result.scalar_one_or_none():
+        # If they already registered, we can just delete the waitlist request here
+        await db.delete(req)
+        await db.commit()
         raise HTTPException(status_code=400, detail="User already exists")
 
     # Check for existing invite
-    existing_invite = await db.execute(select(UserInvite).where(UserInvite.email == email))
-    if existing_invite.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Invite already sent to this email")
+    existing_invite_res = await db.execute(select(UserInvite).where(UserInvite.email == email))
+    existing_invite = existing_invite_res.scalar_one_or_none()
+    
+    if existing_invite:
+        # Resend scenario
+        token = existing_invite.token
+        existing_invite.expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)
+    else:
+        # Create their personal Team
+        team = Team(name=f"{name}'s Workspace")
+        db.add(team)
+        await db.flush()
 
-    # Create their personal Team
-    team = Team(name=f"{name}'s Workspace")
-    db.add(team)
-    await db.flush()
+        # Create invite token
+        token = f"{secrets.token_urlsafe(32)}:individual"
+        existing_invite = UserInvite(
+            email=email,
+            role="owner",
+            team_id=team.id,
+            token=token,
+            expires_at=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)
+        )
+        db.add(existing_invite)
 
-    # Create invite token
-    token = f"{secrets.token_urlsafe(32)}:individual"
-    invite = UserInvite(
-        email=email,
-        role="owner",
-        team_id=team.id,
-        token=token,
-        expires_at=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)
-    )
-    db.add(invite)
-
-    # Delete the waitlist request
-    await db.delete(req)
+    # Note: We do NOT delete the waitlist request here anymore.
+    # It will be deleted when they actually accept the invite.
     await db.commit()
 
-    from app.config import get_settings
-    from app.services.email_service import send_invitation_email
-    settings = get_settings()
     invite_url = f"{settings.ui_base_url}/invite?token={token}"
 
     background_tasks.add_task(

@@ -122,6 +122,7 @@ class WaitlistCreate(BaseModel):
 class WaitlistResponse(BaseModel):
     id: UUID
     email: str
+    status: str = "pending"
     created_at: datetime.datetime
 
     model_config = {"from_attributes": True}

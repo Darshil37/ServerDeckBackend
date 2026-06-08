@@ -120,6 +120,16 @@ async def accept_invite(
     
     # Delete invite
     await db.delete(invite)
+
+    # Clean up WaitlistRequest in public schema if it exists
+    from app.models.organization import WaitlistRequest
+    from sqlalchemy import text
+    # The current search_path is tenant_individual, but WaitlistRequest is bound to 'public' schema
+    waitlist_res = await db.execute(select(WaitlistRequest).where(WaitlistRequest.email == invite.email))
+    waitlist_req = waitlist_res.scalar_one_or_none()
+    if waitlist_req:
+        await db.delete(waitlist_req)
+
     await db.commit()
     
     return {"message": "Account created successfully"}
