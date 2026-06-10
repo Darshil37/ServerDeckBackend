@@ -7,7 +7,13 @@ INSTALL_DIR="/opt/serverdeck"
 # Reload systemd daemon
 systemctl daemon-reload || true
 
-# If package is purged, clean up virtual environment and logs
+# On remove, drop the compiled agent package. The .pyc files are generated at
+# install time (not tracked by dpkg), so dpkg won't clean them up on its own.
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    rm -rf "$INSTALL_DIR/serverdeck_agent"
+fi
+
+# If package is purged, clean up virtual environment, config and logs
 if [ "$1" = "purge" ]; then
     echo "Purging ServerDeck Agent directories..."
     rm -rf "$INSTALL_DIR"

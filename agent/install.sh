@@ -91,6 +91,15 @@ source "$INSTALL_DIR/venv/bin/activate"
 echo -e "${YELLOW}[5/7] Installing Python dependencies...${NC}"
 pip install --quiet websockets psutil
 
+# Step 5b: Compile to bytecode and strip source.
+# The downloaded .py files are only a build input — compile them to sourceless
+# .pyc with the interpreter that will run them, then delete every .py so no
+# Python source is left on the server.
+echo -e "${YELLOW}      Compiling agent and removing source files...${NC}"
+"$INSTALL_DIR/venv/bin/python" -m compileall -b -q "$INSTALL_DIR/serverdeck_agent"
+find "$INSTALL_DIR/serverdeck_agent" -name '*.py' -type f -delete
+find "$INSTALL_DIR/serverdeck_agent" -name '__pycache__' -type d -prune -exec rm -rf {} +
+
 # Step 6: Write configuration
 echo -e "${YELLOW}[6/7] Writing configuration...${NC}"
 mkdir -p "$CONFIG_DIR"

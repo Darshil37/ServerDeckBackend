@@ -76,7 +76,7 @@ This is the part that matters most — you are installing software on your produ
 ### Command allowlist
 The agent maintains an explicit allowlist of every action it will accept. Any command not in that list is rejected outright with an error — the agent does not evaluate or execute unknown command names under any circumstances.
 
-You can inspect the full allowlist in `serverdeck_agent/main.py`.
+You can inspect the full allowlist in `serverdeck_agent/main.py` in this repository. Note that the installer compiles the agent to bytecode and removes all `.py` source from the server, so the installed machine carries only compiled `.pyc` files — audit the source here in the repo, not on the target host.
 
 ### Verifying the install script
 Before running the install command, you can verify what it does:
@@ -96,8 +96,9 @@ The install script:
 1. Downloads the agent tar.gz and verifies its checksum
 2. Extracts it to `/opt/serverdeck/`
 3. Creates a Python virtual environment and installs dependencies
-4. Writes your agent token to `/etc/serverdeck/agent.json`
-5. Creates and enables a systemd service `serverdeck-agent`
+4. Compiles the agent to bytecode and deletes all `.py` source files
+5. Writes your agent token to `/etc/serverdeck/agent.json`
+6. Creates and enables a systemd service `serverdeck-agent`
 
 Nothing else.
 
@@ -154,7 +155,7 @@ systemctl daemon-reload
 
 | Path | What it is |
 |---|---|
-| `/opt/serverdeck/` | Agent code and Python virtual environment |
+| `/opt/serverdeck/` | Compiled agent bytecode (`.pyc`, no source) and Python virtual environment |
 | `/etc/serverdeck/agent.json` | Config file: backend URL and agent token (chmod 600) |
 | `/etc/systemd/system/serverdeck-agent.service` | Systemd unit file |
 | `/var/log/` | Logs go through journald, not a separate file |

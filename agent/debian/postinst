@@ -2,6 +2,7 @@
 set -e
 
 INSTALL_DIR="/opt/serverdeck"
+AGENT_PKG="$INSTALL_DIR/serverdeck_agent"
 SERVICE_NAME="serverdeck-agent"
 
 echo "Setting up ServerDeck Agent..."
@@ -16,7 +17,17 @@ fi
 echo "Installing/upgrading Python dependencies..."
 "$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"
 
-# Step 3: Manage systemd service
+# Step 3: Compile the agent to bytecode and strip all source.
+# The .py files shipped in the package are only a build input: we compile them
+# to sourceless .pyc with the exact interpreter that will run them, then delete
+# every .py. After this step no Python source remains on the machine — the agent
+# imports run purely from the compiled .pyc files.
+echo "Compiling agent and removing source files..."
+"$INSTALL_DIR/venv/bin/python" -m compileall -b -q "$AGENT_PKG"
+find "$AGENT_PKG" -name '*.py' -type f -delete
+find "$AGENT_PKG" -name '__pycache__' -type d -prune -exec rm -rf {} +
+
+# Step 4: Manage systemd service
 if [ -f "/etc/serverdeck/agent.json" ]; then
     echo "Found agent configuration, reloading systemd and restarting service..."
     systemctl daemon-reload || true
