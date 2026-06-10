@@ -136,8 +136,12 @@ async def get_install_command(
     ws_host = base.replace("https://", "").replace("http://", "")
     portal_ws = f"{ws_scheme}://{ws_host}/ws/agent"
     install_cmd = (
-        f"curl -s {base}/install.sh | "
-        f"bash -s -- --token={server.agent_token} --portal={portal_ws}"
+        f"sudo mkdir -p /etc/serverdeck && "
+        f"echo '{{\"portal_url\": \"{portal_ws}\", \"agent_token\": \"{server.agent_token}\", \"telemetry_interval\": 10, \"scan_interval\": 60}}' | "
+        f"sudo tee /etc/serverdeck/agent.json > /dev/null && "
+        f"curl -fsSL {base}/serverdeck-agent.deb -o /tmp/serverdeck-agent.deb && "
+        f"sudo apt-get update && "
+        f"sudo apt-get install -y /tmp/serverdeck-agent.deb"
     )
     return {"install_command": install_cmd, "agent_token": server.agent_token}
 

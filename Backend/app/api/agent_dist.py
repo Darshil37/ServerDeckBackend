@@ -70,3 +70,32 @@ async def download_agent():
             "Content-Disposition": "attachment; filename=serverdeck-agent.tar.gz"
         },
     )
+
+
+@router.get("/serverdeck-agent.deb")
+async def download_agent_deb():
+    """Serve the agent code packaged as a Debian (.deb) package.
+    
+    The package is generated dynamically in-memory.
+    """
+    if not AGENT_ROOT.exists():
+        return {"error": "Agent directory not found"}
+        
+    try:
+        import sys
+        if str(AGENT_ROOT) not in sys.path:
+            sys.path.append(str(AGENT_ROOT))
+        from build_deb import build_deb_in_memory
+        
+        deb_bytes = build_deb_in_memory(AGENT_ROOT)
+        
+        return StreamingResponse(
+            io.BytesIO(deb_bytes),
+            media_type="application/vnd.debian.binary-package",
+            headers={
+                "Content-Disposition": "attachment; filename=serverdeck-agent.deb"
+            },
+        )
+    except Exception as e:
+        return {"error": f"Failed to build Debian package: {str(e)}"}
+

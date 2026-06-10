@@ -1,0 +1,9 @@
+Package: serverdeck-agent
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: python3, python3-venv, python3-pip, systemd
+Maintainer: ServerDeck Team <support@serverdeck.online>
+Description: ServerDeck Agent
+ Lightweight Python service to manage your Linux server from ServerDeck dashboard.

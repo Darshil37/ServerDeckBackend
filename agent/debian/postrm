@@ -1,0 +1,17 @@
+#!/bin/bash
+set -e
+
+SERVICE_NAME="serverdeck-agent"
+INSTALL_DIR="/opt/serverdeck"
+
+# Reload systemd daemon
+systemctl daemon-reload || true
+
+# If package is purged, clean up virtual environment and logs
+if [ "$1" = "purge" ]; then
+    echo "Purging ServerDeck Agent directories..."
+    rm -rf "$INSTALL_DIR"
+    rm -rf "/etc/serverdeck"
+fi
+
+exit 0

@@ -1,0 +1,17 @@
+#!/bin/bash
+set -e
+
+SERVICE_NAME="serverdeck-agent"
+
+# Stop and disable the service if it exists and is running
+if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    echo "Stopping $SERVICE_NAME service..."
+    systemctl stop "$SERVICE_NAME" || true
+fi
+
+if systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
+    echo "Disabling $SERVICE_NAME service..."
+    systemctl disable "$SERVICE_NAME" || true
+fi
+
+exit 0

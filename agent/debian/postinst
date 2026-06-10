@@ -1,0 +1,42 @@
+#!/bin/bash
+set -e
+
+INSTALL_DIR="/opt/serverdeck"
+SERVICE_NAME="serverdeck-agent"
+
+echo "Setting up ServerDeck Agent..."
+
+# Step 1: Create virtual environment
+if [ ! -d "$INSTALL_DIR/venv" ]; then
+    echo "Creating Python virtual environment..."
+    python3 -m venv "$INSTALL_DIR/venv"
+fi
+
+# Step 2: Install/upgrade Python dependencies
+echo "Installing/upgrading Python dependencies..."
+"$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"
+
+# Step 3: Manage systemd service
+if [ -f "/etc/serverdeck/agent.json" ]; then
+    echo "Found agent configuration, reloading systemd and restarting service..."
+    systemctl daemon-reload || true
+    systemctl enable "$SERVICE_NAME" || true
+    systemctl restart "$SERVICE_NAME" || true
+else
+    echo ""
+    echo "=========================================================="
+    echo "WARNING: ServerDeck Agent configuration not found."
+    echo "Please configure the agent by creating: /etc/serverdeck/agent.json"
+    echo "Example content:"
+    echo '  {"portal_url": "wss://your-portal/ws/agent", "agent_token": "your-token"}'
+    echo ""
+    echo "After creating the file, start the agent service by running:"
+    echo "  sudo systemctl enable --now serverdeck-agent"
+    echo "=========================================================="
+    echo ""
+    # Just enable, but don't start yet since it lacks config
+    systemctl daemon-reload || true
+    systemctl enable "$SERVICE_NAME" || true
+fi
+
+exit 0
